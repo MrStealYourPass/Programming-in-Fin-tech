@@ -1,0 +1,158 @@
+@author: Dehao Liu and Miguel Lagoa 
+"""
+
+"""Import relevant Python libraries"""
+
+import pandas as pd
+import yfinance as yf
+yf.pdr_override()
+import matplotlib.pyplot as plt
+import numpy as np
+import numpy.random as npr
+from pandas_datareader import data, wb
+import scipy.optimize as sco
+
+""" Stocks tickers, starting date and end date to assess our portfolio"""
+
+stocks = ['META', 'AAPL', 'MSFT', 'TSLA', 'ADBE']
+start_date = '2013-01-01'
+end_date = '2023-12-01'
+
+"""Creation of dataframe to retrieve stock information"""
+
+stocks_data = pd.DataFrame()
+
+""" Download stock data into a list"""
+
+for stock_symbol in stocks:
+    stock_data = yf.download(stock_symbol, start=start_date, end=end_date)
+    stocks_data[stock_symbol] = stock_data['Close']
+
+"""calculate daily returns of stocks"""
+
+daily_returns = stocks_data.pct_change()
+
+noa = len(stocks)
+
+
+(stocks_data / stocks_data.iloc[0] * 100).plot(figsize=(8, 5))
+
+
+"""calculate log returns, mean returns and covariance matrix"""
+
+rets = np.log(stocks_data / stocks_data.shift(1))
+rets.mean() * 252
+rets.cov() * 252
+
+"""Generating random portfolio weights and calculate returns and volatility"""
+
+w = np.random.random(noa)
+w /=np.sum(w)
+
+"""MC simulation for portfolio optimization"""
+
+p_rets = []
+p_vols = []
+
+for p in range (1000):
+    w = np.random.random(noa)
+    w /=np.sum(w)
+    p_rets.append(np.sum(rets.mean()*w)*252)
+    p_vols.append(np.sqrt(np.dot(w.T,np.dot(rets.cov()*252, w))))
+p_rets = np.array(p_rets)
+p_vols = np.array(p_vols)
+
+"""Define function for portfolio statistics and optimization"""
+
+def statistics(w):
+    w = np.array(w)
+    p_ret = np.sum(rets.mean()*w)*252
+    p_vol = np.sqrt(np.dot(w.T, np.dot(rets.cov() *252 , w)))
+    return np.array([p_ret,p_vol,p_ret/p_vol])
+
+"""Minimizing the negative of the Sharpe Ratio"""
+
+def min_func_sharpe(w):
+    return -statistics(w)[2]
+
+"""Specifying the constraints of our optimisation problem""" 
+
+def sum_constraint(x):
+    return np.sum(x)-1
+
+"""Add our clients' investment condition (max weight per stock= 0.4)"""
+
+cons = ({'type': 'eq', 'fun' : sum_constraint},
+        {'type': 'ineq', 'fun' : lambda w: 0.4-w})
+bnds = tuple((0, 1) for x in range(noa))
+
+
+"""Kick start optimisation algorithm"""
+ 
+noa * [1. / noa,]
+opts = sco.minimize(min_func_sharpe, noa * [1. / noa,], method='SLSQP',
+                    bounds=bnds, constraints=cons)
+
+opt_s = opts['x'].round(3)
+
+
+"""Weights for each stock"""
+
+print("The optimized weight for each of the recommended stock is:")
+
+opt_string = (
+    f"-{stocks[0]}:{opt_s[0]} \n-{stocks[1]}:{opt_s[1]}\n"
+    f"-{stocks[2]}:{opt_s[2]} \n-{stocks[3]}:{opt_s[3]}\n"
+    f"-{stocks[4]}:{opt_s[4]}"
+    )
+print(opt_string)
+
+"""Minimising the volatility of our portfolio"""
+
+def min_func_variance(w):
+    return statistics(w)[1] ** 2
+optv = sco.minimize(min_func_variance, noa * [1. / noa,], 
+                    method='SLSQP', bounds=bnds, constraints=cons)
+optv['x'].round(3)
+sto_stats = statistics(optv['x']).round(3)
+
+
+
+"""Highlighting the statistics of the portfolio"""
+
+print("Key statistics of your portfolio:")
+
+opt_string2 = (
+    f"Expected return: {sto_stats[0]}; \nVolatility: {sto_stats[1]};\n"
+    f"Sharpe ratio: {sto_stats[2]}."
+    )
+print(opt_string2)
+
+"""Calculate efficient frontier"""
+
+def min_func_port(weights):
+    return statistics(weights)[1]
+
+
+trets = np.linspace(0.0, 0.25, 50) 
+tvols = []
+
+def return_constraint(weights):
+    return statistics(weights)[0] - tret
+
+
+tvols = []
+for tret in trets:
+    cons = ({'type': 'eq', 'fun': sum_constraint},
+            {'type': 'eq', 'fun': return_constraint})
+    res = sco.minimize(min_func_port, noa * [1. / noa,], method='SLSQP',
+                       bounds=bnds, constraints=cons)
+    tvols.append(res['fun'])
+    
+tvols = np.array(tvols)
+
+plt.figure(figsize= (8,4))
+plt.scatter(p_vols, p_rets, c= p_rets / p_vols, marker ='o')
+plt.plot(statistics(optv['x'])[1], statistics(optv['x'])[0], 'r*', markersize = 15.0)
+    
+
